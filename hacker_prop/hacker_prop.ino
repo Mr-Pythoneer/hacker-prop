@@ -181,6 +181,14 @@ uint32_t speedChangeTime = 0;
 int currentDelay = 30;
 int burstRemaining = 0;
 
+// ── Big message overlay state ───────────────────────────────────
+bool msgActive = false;
+uint32_t msgStartTime = 0;
+uint32_t msgDuration = 0;
+int msgY = 0;
+uint32_t lastBigMsg = 0;
+uint32_t nextBigMsgInterval = 5000;
+
 // ── Selected target/attack ──────────────────────────────────────
 int selectedTarget = -1;
 int selectedAttack = -1;
@@ -834,8 +842,11 @@ void loop() {
                 lastLineTime = now;
 
                 int y = cursorLine * FONT_H;
-                lcd.fillRect(0, y, W, FONT_H, TFT_BLACK);
-                drawTerminalLine(y);
+                // skip lines that overlap the message box
+                if (!(msgActive && y >= msgY - 4 && y <= msgY + FONT_H * 5 + 4)) {
+                    lcd.fillRect(0, y, W, FONT_H, TFT_BLACK);
+                    drawTerminalLine(y);
+                }
                 cursorLine = (cursorLine + 1) % MAX_LINES;
 
                 if (burstRemaining > 0) {
@@ -849,160 +860,216 @@ void loop() {
 
             if (random(400) < 3) spawnProgressBar();
 
-            // periodic big status messages — freeze everything
-            static uint32_t lastBigMsg = 0;
-            static uint32_t nextBigMsgInterval = 5000;
-            if (now - lastBigMsg > nextBigMsgInterval) {
-                lastBigMsg = now;
-                nextBigMsgInterval = 3000 + random(27000);
-
-                // clear center area for the message
-                int msgY = (H / 2) - FONT_H * 2;
-                lcd.fillRect(0, msgY - 4, W, FONT_H * 5 + 8, TFT_BLACK);
-                lcd.drawRect(2, msgY - 2, W - 4, FONT_H * 5 + 4, dimGreen(60));
-
-                int v = random(30);
-                int pauseMs = 1500 + random(2000);
-
-                if (v < 5) {
-                    // big green success
-                    lcd.setTextSize(2);
-                    lcd.setTextColor(hackerGreen(), TFT_BLACK);
-                    const char* wins[] = {"SUCCESS!","PWNED!","OWNED!","HACKED!","GOT ROOT!"};
-                    int tw = strlen(wins[v]) * 12;
-                    lcd.setCursor((W - tw) / 2, msgY + 4);
-                    lcd.print(wins[v]);
-                    lcd.setTextSize(1);
-                    lcd.setTextColor(dimGreen(160), TFT_BLACK);
-                    lcd.setCursor(8, msgY + 28);
-                    makeIP(_ip1);
-                    lcd.printf("Target %s compromised", _ip1);
-                    buzz(2000, 80); delay(100); buzz(2500, 80);
-                } else if (v < 9) {
-                    // big red failure
-                    lcd.setTextSize(2);
-                    lcd.setTextColor(termRed(), TFT_BLACK);
-                    const char* fails[] = {"FAILED!","BLOCKED!","DENIED!","TIMEOUT!"};
-                    int tw = strlen(fails[v-5]) * 12;
-                    lcd.setCursor((W - tw) / 2, msgY + 4);
-                    lcd.print(fails[v-5]);
-                    lcd.setTextSize(1);
-                    lcd.setTextColor(dimGreen(120), TFT_BLACK);
-                    lcd.setCursor(8, msgY + 28);
-                    makeIP(_ip1);
-                    lcd.printf("Host %s fought back", _ip1);
-                    buzz(300, 100); delay(80); buzz(200, 150);
-                    pauseMs = 1000 + random(1500);
-                } else if (v < 13) {
-                    // data exfil
-                    lcd.setTextSize(1);
-                    lcd.setTextColor(termCyan(), TFT_BLACK);
-                    lcd.setCursor(8, msgY + 4);
-                    lcd.printf(">>> %d.%dTB EXFILTRATED <<<", random(1,999), random(1,99));
-                    lcd.setTextColor(dimGreen(140), TFT_BLACK);
-                    lcd.setCursor(8, msgY + 18);
-                    makeIP(_ip1);
-                    lcd.printf("Source: %s", _ip1);
-                    lcd.setCursor(8, msgY + 30);
-                    lcd.printf("Files: %d classified docs", random(100,50000));
-                    buzz(1800, 40);
-                } else if (v < 16) {
-                    // bitcoin transfer
-                    lcd.setTextSize(1);
-                    lcd.setTextColor(termYellow(), TFT_BLACK);
-                    lcd.setCursor(8, msgY + 4);
-                    lcd.printf("$$$ %d BTC TRANSFERRED $$$", random(2,500));
-                    lcd.setTextColor(dimGreen(140), TFT_BLACK);
-                    lcd.setCursor(8, msgY + 18);
-                    lcd.printf("Wallet: %08lx...%04lx", rh(), rh()&0xFFFF);
-                    lcd.setCursor(8, msgY + 30);
-                    lcd.printf("Value: $%d,%03d,%03d USD", random(1,99), random(100,999), random(100,999));
-                    buzz(2500, 50);
-                } else if (v < 19) {
-                    // password dump
-                    lcd.setTextSize(1);
-                    lcd.setTextColor(hackerGreen(), TFT_BLACK);
-                    lcd.setCursor(8, msgY + 4);
-                    lcd.printf("[+] %d PASSWORDS CRACKED", random(500,99999));
-                    lcd.setTextColor(dimGreen(140), TFT_BLACK);
-                    lcd.setCursor(8, msgY + 18);
-                    lcd.printf("Accounts: %d compromised", random(100,25000));
-                    lcd.setCursor(8, msgY + 30);
-                    lcd.printf("Admin creds: %d found", random(1,50));
-                    buzz(1800, 40);
-                } else if (v < 22) {
-                    // network takeover
-                    lcd.setTextSize(1);
-                    lcd.setTextColor(termCyan(), TFT_BLACK);
-                    lcd.setCursor(8, msgY + 4);
-                    lcd.print("[+] NETWORK TAKEOVER");
-                    lcd.setTextColor(dimGreen(140), TFT_BLACK);
-                    lcd.setCursor(8, msgY + 18);
-                    lcd.printf("Nodes owned: %d/%d", random(50,254), 254);
-                    lcd.setCursor(8, msgY + 30);
-                    makeIP(_ip1);
-                    lcd.printf("Gateway: %s hijacked", _ip1);
-                    buzz(2000, 30); delay(60); buzz(2200, 30);
-                } else if (v < 24) {
-                    // database dump
-                    lcd.setTextSize(1);
-                    lcd.setTextColor(termYellow(), TFT_BLACK);
-                    lcd.setCursor(8, msgY + 4);
-                    lcd.print(">>> DATABASE DUMPED <<<");
-                    lcd.setTextColor(dimGreen(140), TFT_BLACK);
-                    lcd.setCursor(8, msgY + 18);
-                    lcd.printf("Tables: %d  Rows: %dM", random(20,500), random(1,999));
-                    lcd.setCursor(8, msgY + 30);
-                    lcd.printf("SSNs: %d  Cards: %d", random(10000,999999), random(1000,99999));
-                    buzz(1500, 60);
-                } else if (v < 26) {
-                    // camera access
-                    lcd.setTextSize(1);
-                    lcd.setTextColor(termRed(), TFT_BLACK);
-                    lcd.setCursor(8, msgY + 4);
-                    lcd.print("[!] CCTV FEED HIJACKED");
-                    lcd.setTextColor(dimGreen(140), TFT_BLACK);
-                    lcd.setCursor(8, msgY + 18);
-                    lcd.printf("Cameras: %d streams live", random(4,128));
-                    lcd.setCursor(8, msgY + 30);
-                    makeIP(_ip1);
-                    lcd.printf("DVR: %s root access", _ip1);
-                    buzz(1200, 50);
-                } else if (v < 28) {
-                    // satellite link
-                    lcd.setTextSize(1);
-                    lcd.setTextColor(termCyan(), TFT_BLACK);
-                    lcd.setCursor(8, msgY + 4);
-                    lcd.print("<<< SAT LINK ACQUIRED >>>");
-                    lcd.setTextColor(dimGreen(140), TFT_BLACK);
-                    lcd.setCursor(8, msgY + 18);
-                    lcd.printf("Orbit: %dkm  Band: %cGHz", random(200,36000), "CXKS"[random(4)]);
-                    lcd.setCursor(8, msgY + 30);
-                    lcd.printf("Uplink: %dMbps encrypted", random(50,900));
-                    buzz(2800, 40);
-                } else {
-                    // firewall bypass
-                    lcd.setTextSize(1);
-                    lcd.setTextColor(hackerGreen(), TFT_BLACK);
-                    lcd.setCursor(8, msgY + 4);
-                    lcd.print("[+] FIREWALL BYPASSED");
-                    lcd.setTextColor(dimGreen(140), TFT_BLACK);
-                    lcd.setCursor(8, msgY + 18);
-                    lcd.printf("Rules evaded: %d/%d", random(50,200), random(200,300));
-                    lcd.setCursor(8, msgY + 30);
-                    lcd.printf("Zero-days used: %d", random(1,5));
-                    buzz(2000, 30); delay(60); buzz(2400, 30);
-                }
-
-                lcd.setTextSize(1);
-                delay(pauseMs);
-
-                // clear message and redraw those lines
+            // clear expired message overlay
+            if (msgActive && now - msgStartTime > msgDuration) {
+                msgActive = false;
                 lcd.fillRect(0, msgY - 4, W, FONT_H * 5 + 8, TFT_BLACK);
                 for (int row = (msgY - 4) / FONT_H; row <= (msgY + FONT_H * 5 + 4) / FONT_H && row < MAX_LINES; row++) {
                     if (row >= 0) drawTerminalLine(row * FONT_H);
                 }
-                lastLineTime = millis();
+            }
+
+            // spawn new message overlay (non-blocking)
+            if (!msgActive && now - lastBigMsg > nextBigMsgInterval) {
+                lastBigMsg = now;
+                nextBigMsgInterval = 3000 + random(27000);
+                msgActive = true;
+                msgStartTime = now;
+                msgDuration = 1500 + random(2500);
+                msgY = (H / 2) - FONT_H * 2;
+
+                lcd.fillRect(0, msgY - 4, W, FONT_H * 5 + 8, TFT_BLACK);
+                lcd.drawRect(2, msgY - 2, W - 4, FONT_H * 5 + 4, dimGreen(60));
+
+                makeIP(_ip1);
+                int v = random(30);
+
+                switch (v) {
+                case 0: case 1: case 2: case 3: case 4: {
+                    lcd.setTextSize(2);
+                    lcd.setTextColor(hackerGreen(), TFT_BLACK);
+                    const char* w[] = {"SUCCESS!","PWNED!","OWNED!","HACKED!","GOT ROOT!"};
+                    lcd.setCursor((W - strlen(w[v])*12)/2, msgY+4);
+                    lcd.print(w[v]);
+                    lcd.setTextSize(1); lcd.setTextColor(dimGreen(160), TFT_BLACK);
+                    lcd.setCursor(8, msgY+28); lcd.printf("Target %s compromised", _ip1);
+                    buzz(2000, 60);
+                    break;
+                }
+                case 5: case 6: case 7: {
+                    lcd.setTextSize(2);
+                    lcd.setTextColor(termRed(), TFT_BLACK);
+                    const char* f[] = {"FAILED!","BLOCKED!","DENIED!"};
+                    lcd.setCursor((W - strlen(f[v-5])*12)/2, msgY+4);
+                    lcd.print(f[v-5]);
+                    lcd.setTextSize(1); lcd.setTextColor(dimGreen(120), TFT_BLACK);
+                    lcd.setCursor(8, msgY+28); lcd.printf("Host %s fought back", _ip1);
+                    buzz(300, 80);
+                    msgDuration = 1000 + random(1500);
+                    break;
+                }
+                case 8: case 9:
+                    lcd.setTextSize(1); lcd.setTextColor(termCyan(), TFT_BLACK);
+                    lcd.setCursor(8, msgY+4); lcd.printf(">>> %d.%dTB EXFILTRATED <<<", random(1,999), random(1,99));
+                    lcd.setTextColor(dimGreen(140), TFT_BLACK);
+                    lcd.setCursor(8, msgY+18); lcd.printf("Source: %s", _ip1);
+                    lcd.setCursor(8, msgY+30); lcd.printf("Files: %d classified docs", random(100,50000));
+                    buzz(1800, 30);
+                    break;
+                case 10: case 11:
+                    lcd.setTextSize(1); lcd.setTextColor(termYellow(), TFT_BLACK);
+                    lcd.setCursor(8, msgY+4); lcd.printf("$$$ %d BTC TRANSFERRED $$$", random(2,500));
+                    lcd.setTextColor(dimGreen(140), TFT_BLACK);
+                    lcd.setCursor(8, msgY+18); lcd.printf("Wallet: %08lx...%04lx", rh(), rh()&0xFFFF);
+                    lcd.setCursor(8, msgY+30); lcd.printf("Value: $%d,%03d,%03d USD", random(1,99), random(100,999), random(100,999));
+                    buzz(2500, 40);
+                    break;
+                case 12:
+                    lcd.setTextSize(1); lcd.setTextColor(hackerGreen(), TFT_BLACK);
+                    lcd.setCursor(8, msgY+4); lcd.printf("[+] %d PASSWORDS CRACKED", random(500,99999));
+                    lcd.setTextColor(dimGreen(140), TFT_BLACK);
+                    lcd.setCursor(8, msgY+18); lcd.printf("Accounts: %d compromised", random(100,25000));
+                    lcd.setCursor(8, msgY+30); lcd.printf("Admin creds: %d found", random(1,50));
+                    buzz(1800, 30);
+                    break;
+                case 13:
+                    lcd.setTextSize(1); lcd.setTextColor(termCyan(), TFT_BLACK);
+                    lcd.setCursor(8, msgY+4); lcd.print("[+] NETWORK TAKEOVER");
+                    lcd.setTextColor(dimGreen(140), TFT_BLACK);
+                    lcd.setCursor(8, msgY+18); lcd.printf("Nodes owned: %d/%d", random(50,254), 254);
+                    lcd.setCursor(8, msgY+30); lcd.printf("Gateway: %s hijacked", _ip1);
+                    buzz(2000, 30);
+                    break;
+                case 14:
+                    lcd.setTextSize(1); lcd.setTextColor(termYellow(), TFT_BLACK);
+                    lcd.setCursor(8, msgY+4); lcd.print(">>> DATABASE DUMPED <<<");
+                    lcd.setTextColor(dimGreen(140), TFT_BLACK);
+                    lcd.setCursor(8, msgY+18); lcd.printf("Tables: %d  Rows: %dM", random(20,500), random(1,999));
+                    lcd.setCursor(8, msgY+30); lcd.printf("SSNs: %d  Cards: %d", random(10000,999999), random(1000,99999));
+                    buzz(1500, 40);
+                    break;
+                case 15:
+                    lcd.setTextSize(1); lcd.setTextColor(termRed(), TFT_BLACK);
+                    lcd.setCursor(8, msgY+4); lcd.print("[!] CCTV FEED HIJACKED");
+                    lcd.setTextColor(dimGreen(140), TFT_BLACK);
+                    lcd.setCursor(8, msgY+18); lcd.printf("Cameras: %d streams live", random(4,128));
+                    lcd.setCursor(8, msgY+30); lcd.printf("DVR: %s root access", _ip1);
+                    buzz(1200, 40);
+                    break;
+                case 16:
+                    lcd.setTextSize(1); lcd.setTextColor(termCyan(), TFT_BLACK);
+                    lcd.setCursor(8, msgY+4); lcd.print("<<< SAT LINK ACQUIRED >>>");
+                    lcd.setTextColor(dimGreen(140), TFT_BLACK);
+                    lcd.setCursor(8, msgY+18); lcd.printf("Orbit: %dkm  Band: %cGHz", random(200,36000), "CXKS"[random(4)]);
+                    lcd.setCursor(8, msgY+30); lcd.printf("Uplink: %dMbps encrypted", random(50,900));
+                    buzz(2800, 30);
+                    break;
+                case 17:
+                    lcd.setTextSize(1); lcd.setTextColor(hackerGreen(), TFT_BLACK);
+                    lcd.setCursor(8, msgY+4); lcd.print("[+] FIREWALL BYPASSED");
+                    lcd.setTextColor(dimGreen(140), TFT_BLACK);
+                    lcd.setCursor(8, msgY+18); lcd.printf("Rules evaded: %d/%d", random(50,200), random(200,300));
+                    lcd.setCursor(8, msgY+30); lcd.printf("Zero-days used: %d", random(1,5));
+                    buzz(2000, 30);
+                    break;
+                case 18:
+                    lcd.setTextSize(1); lcd.setTextColor(termRed(), TFT_BLACK);
+                    lcd.setCursor(8, msgY+4); lcd.print("[!] RANSOMWARE DEPLOYED");
+                    lcd.setTextColor(dimGreen(140), TFT_BLACK);
+                    lcd.setCursor(8, msgY+18); lcd.printf("Encrypted: %d files", random(10000,999999));
+                    lcd.setCursor(8, msgY+30); lcd.printf("Ransom: %d BTC demanded", random(5,200));
+                    buzz(400, 60);
+                    break;
+                case 19:
+                    lcd.setTextSize(1); lcd.setTextColor(hackerGreen(), TFT_BLACK);
+                    lcd.setCursor(8, msgY+4); lcd.print("[+] BACKDOOR INSTALLED");
+                    lcd.setTextColor(dimGreen(140), TFT_BLACK);
+                    lcd.setCursor(8, msgY+18); lcd.printf("Persistence: kernel lvl %d", random(0,3));
+                    lcd.setCursor(8, msgY+30); lcd.printf("Beacon: every %ds to C2", random(5,300));
+                    buzz(1800, 30);
+                    break;
+                case 20:
+                    lcd.setTextSize(1); lcd.setTextColor(termYellow(), TFT_BLACK);
+                    lcd.setCursor(8, msgY+4); lcd.print(">>> EMAILS INTERCEPTED <<<");
+                    lcd.setTextColor(dimGreen(140), TFT_BLACK);
+                    lcd.setCursor(8, msgY+18); lcd.printf("Inbox: %d messages copied", random(200,50000));
+                    lcd.setCursor(8, msgY+30); lcd.printf("Attachments: %dGB saved", random(1,500));
+                    buzz(2200, 30);
+                    break;
+                case 21:
+                    lcd.setTextSize(1); lcd.setTextColor(termCyan(), TFT_BLACK);
+                    lcd.setCursor(8, msgY+4); lcd.print("[+] VPN TUNNEL HIJACKED");
+                    lcd.setTextColor(dimGreen(140), TFT_BLACK);
+                    lcd.setCursor(8, msgY+18); lcd.printf("Users routed: %d", random(20,5000));
+                    lcd.setCursor(8, msgY+30); lcd.printf("Traffic mirrored to %s", _ip1);
+                    buzz(2000, 30);
+                    break;
+                case 22:
+                    lcd.setTextSize(1); lcd.setTextColor(termRed(), TFT_BLACK);
+                    lcd.setCursor(8, msgY+4); lcd.print("[!] POWER GRID ACCESS");
+                    lcd.setTextColor(dimGreen(140), TFT_BLACK);
+                    lcd.setCursor(8, msgY+18); lcd.printf("Substations: %d/%d online", random(3,20), random(20,30));
+                    lcd.setCursor(8, msgY+30); lcd.printf("SCADA node %s owned", _ip1);
+                    buzz(500, 80);
+                    break;
+                case 23:
+                    lcd.setTextSize(1); lcd.setTextColor(hackerGreen(), TFT_BLACK);
+                    lcd.setCursor(8, msgY+4); lcd.print("[+] DNS POISONED");
+                    lcd.setTextColor(dimGreen(140), TFT_BLACK);
+                    lcd.setCursor(8, msgY+18); lcd.printf("Domains hijacked: %d", random(5,500));
+                    lcd.setCursor(8, msgY+30); lcd.printf("Redirecting to %s", _ip1);
+                    buzz(1600, 30);
+                    break;
+                case 24:
+                    lcd.setTextSize(1); lcd.setTextColor(termYellow(), TFT_BLACK);
+                    lcd.setCursor(8, msgY+4); lcd.print(">>> CRYPTO WALLET DRAINED");
+                    lcd.setTextColor(dimGreen(140), TFT_BLACK);
+                    lcd.setCursor(8, msgY+18); lcd.printf("ETH: %d.%02d stolen", random(10,9999), random(0,99));
+                    lcd.setCursor(8, msgY+30); lcd.printf("NFTs: %d transferred", random(1,200));
+                    buzz(2500, 40);
+                    break;
+                case 25:
+                    lcd.setTextSize(1); lcd.setTextColor(termCyan(), TFT_BLACK);
+                    lcd.setCursor(8, msgY+4); lcd.print("[+] BOTNET EXPANDED");
+                    lcd.setTextColor(dimGreen(140), TFT_BLACK);
+                    lcd.setCursor(8, msgY+18); lcd.printf("New zombies: %d devices", random(100,50000));
+                    lcd.setCursor(8, msgY+30); lcd.printf("Total army: %dk bots", random(10,999));
+                    buzz(1800, 30);
+                    break;
+                case 26:
+                    lcd.setTextSize(1); lcd.setTextColor(termRed(), TFT_BLACK);
+                    lcd.setCursor(8, msgY+4); lcd.print("[!] AIR GAP BREACHED");
+                    lcd.setTextColor(dimGreen(140), TFT_BLACK);
+                    lcd.setCursor(8, msgY+18); lcd.printf("Method: USB drop #%d", random(1,20));
+                    lcd.setCursor(8, msgY+30); lcd.print("Classified net accessed");
+                    buzz(600, 60);
+                    break;
+                case 27:
+                    lcd.setTextSize(1); lcd.setTextColor(hackerGreen(), TFT_BLACK);
+                    lcd.setCursor(8, msgY+4); lcd.print("[+] KEYLOGGER ACTIVE");
+                    lcd.setTextColor(dimGreen(140), TFT_BLACK);
+                    lcd.setCursor(8, msgY+18); lcd.printf("Keystrokes: %d captured", random(5000,999999));
+                    lcd.setCursor(8, msgY+30); lcd.printf("Credentials: %d logged", random(10,500));
+                    buzz(1500, 30);
+                    break;
+                case 28:
+                    lcd.setTextSize(1); lcd.setTextColor(termYellow(), TFT_BLACK);
+                    lcd.setCursor(8, msgY+4); lcd.print(">>> SUPPLY CHAIN PWNED <<<");
+                    lcd.setTextColor(dimGreen(140), TFT_BLACK);
+                    lcd.setCursor(8, msgY+18); lcd.printf("Packages infected: %d", random(3,50));
+                    lcd.setCursor(8, msgY+30); lcd.printf("Downstream targets: %dk", random(10,500));
+                    buzz(2200, 40);
+                    break;
+                default:
+                    lcd.setTextSize(1); lcd.setTextColor(termCyan(), TFT_BLACK);
+                    lcd.setCursor(8, msgY+4); lcd.print("[+] 2FA BYPASSED");
+                    lcd.setTextColor(dimGreen(140), TFT_BLACK);
+                    lcd.setCursor(8, msgY+18); lcd.printf("SIM swapped: +1-%03d-%04d", random(200,999), random(1000,9999));
+                    lcd.setCursor(8, msgY+30); lcd.printf("OTP intercepted x%d", random(2,20));
+                    buzz(1800, 30);
+                    break;
+                }
+                lcd.setTextSize(1);
             }
 
             updateProgressBars();
